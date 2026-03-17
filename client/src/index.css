@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════ Tema Oscuro — Hacker Naranja ═══════════ */
+.dark body {
+  background-color: #0d1117;
+  color: #FF8800;
+  font-family: 'Fira Code', 'Roboto Mono', ui-monospace, monospace;
+}
+
+.dark ::selection {
+  background-color: rgba(255, 136, 0, 0.3);
+  color: #fff;
+}
+
+.dark ::-webkit-scrollbar {
+  width: 6px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #0d1117;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #FF8800;
+  border-radius: 3px;
+}
+
+/* ═══════════ Tema Claro — Papertex ═══════════ */
+body:not(.dark body) {
+  font-family: 'Patrick Hand', cursive;
+}
+
+:root:not(.dark) body {
+  background-color: #F5EEDA;
+  background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  color: #2C2416;
+}
+
+html:not(.dark) ::selection {
+  background-color: rgba(139, 115, 85, 0.3);
+  color: #2C2416;
+}
+
+/* ═══════════ Componentes Compartidos ═══════════ */
+.card-hacker {
+  @apply border border-hacker-orange/40 bg-hacker-bg/80 backdrop-blur-sm rounded-md;
+}
+
+.card-paper {
+  @apply border-2 border-paper-ink/20 bg-paper-bg rounded-lg shadow-paper;
+  border-style: solid;
+  border-image: none;
+}
+
+.btn-hacker {
+  @apply bg-transparent border border-hacker-orange text-hacker-orange
+         px-4 py-2 rounded font-mono text-sm
+         hover:bg-hacker-orange/10 hover:shadow-neon-sm
+         active:bg-hacker-orange/20
+         transition-all duration-200
+         disabled:opacity-30 disabled:cursor-not-allowed;
+}
+
+.btn-paper {
+  @apply bg-paper-bg-dark border-2 border-paper-ink/30 text-paper-ink
+         px-4 py-2 rounded-lg font-sketch text-lg
+         hover:bg-paper-bg hover:shadow-paper
+         active:translate-y-0.5
+         transition-all duration-200
+         disabled:opacity-30 disabled:cursor-not-allowed;
+}
+
+.input-hacker {
+  @apply bg-transparent border border-hacker-orange/50 text-hacker-orange
+         px-3 py-2 rounded font-mono text-sm
+         placeholder:text-hacker-orange/30
+         focus:outline-none focus:border-hacker-orange focus:shadow-neon-sm
+         transition-all duration-200;
+}
+
+.input-paper {
+  @apply bg-white/60 border-2 border-paper-ink/20 text-paper-ink
+         px-3 py-2 rounded-lg font-sketch text-lg
+         placeholder:text-paper-sepia/50
+         focus:outline-none focus:border-paper-sepia focus:shadow-paper-sm
+         transition-all duration-200;
+}
