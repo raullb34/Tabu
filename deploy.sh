@@ -64,12 +64,13 @@ echo "  ✓  server/.env configurado"
 echo "[5/6] Configurando Nginx y SSL..."
 
 # Instalar Nginx y Certbot si no están presentes
+sudo apt-get update -qq
 if ! command -v nginx &>/dev/null; then
   echo "  Instalando Nginx..."
-  sudo apt-get update -qq && sudo apt-get install -y -qq nginx
+  sudo apt-get install -y -qq nginx
 fi
-if ! command -v certbot &>/dev/null; then
-  echo "  Instalando Certbot..."
+if ! dpkg -s python3-certbot-nginx &>/dev/null 2>&1; then
+  echo "  Instalando Certbot + plugin Nginx..."
   sudo apt-get install -y -qq certbot python3-certbot-nginx
 fi
 
@@ -80,21 +81,41 @@ server {
     listen 80;
     server_name $DOMAIN;
 
-    # Redirigir todo HTTP a HTTPS (Certbot lo reescribirá)
     location / {
-        return 301 https://\$host\$request_uri;
+        root $APP_DIR/client/dist;
+        index index.html;
+        try_files \$uri \$uri/ /index.html;
     }
+}
+NGINX
+
+sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+
+# Obtener certificado SSL si no existe
+if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+  echo "  Obteniendo certificado SSL con Certbot..."
+  sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
+fi
+
+# Asegurar configuración final con proxy al backend
+sudo tee "$NGINX_CONF" > /dev/null <<NGINX
+server {
+    listen 80;
+    server_name $DOMAIN;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
     listen 443 ssl;
     server_name $DOMAIN;
 
-    # Certbot rellenará estas rutas
     ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    # Frontend estático
     root $APP_DIR/client/dist;
     index index.html;
 
@@ -102,7 +123,6 @@ server {
         try_files \$uri \$uri/ /index.html;
     }
 
-    # API y Socket.IO → backend Node
     location /socket.io/ {
         proxy_pass http://127.0.0.1:$PORT;
         proxy_http_version 1.1;
@@ -121,15 +141,6 @@ server {
     }
 }
 NGINX
-
-sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-
-# Obtener certificado SSL si no existe
-if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-  echo "  Obteniendo certificado SSL con Certbot..."
-  sudo certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
-fi
 
 sudo nginx -t && sudo systemctl reload nginx
 echo "  ✓  Nginx configurado con SSL"
