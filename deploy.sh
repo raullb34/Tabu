@@ -145,6 +145,16 @@ NGINX
 sudo nginx -t && sudo systemctl reload nginx
 echo "  ✓  Nginx configurado con SSL"
 
+# Asegurar permisos para que Nginx (www-data) pueda leer el frontend
+echo "  Ajustando permisos..."
+# Dar acceso de ejecución (traverse) a cada directorio padre hasta dist
+CURRENT="$APP_DIR/client/dist"
+while [ "$CURRENT" != "/" ]; do
+  sudo chmod o+rx "$CURRENT"
+  CURRENT="$(dirname "$CURRENT")"
+done
+sudo chmod -R o+r "$APP_DIR/client/dist"
+
 # ── 6. Crear servicio systemd ──
 echo "[6/6] Configurando servicio systemd..."
 
