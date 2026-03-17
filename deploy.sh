@@ -10,6 +10,15 @@ echo "  TABÚ — Instalación y Despliegue"
 echo "  Dominio: $DOMAIN"
 echo "═══════════════════════════════════"
 
+# ── 0. Instalar Node.js y npm si no están disponibles ──
+if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+  echo ""
+  echo "[0/6] Instalando Node.js y npm..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt-get install -y -qq nodejs
+  echo "  ✓  Node $(node -v) / npm $(npm -v)"
+fi
+
 # ── 1. Dependencias del servidor ──
 echo ""
 echo "[1/6] Instalando dependencias del servidor..."
