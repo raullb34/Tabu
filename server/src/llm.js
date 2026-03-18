@@ -10,15 +10,22 @@ const SYSTEM_PROMPT = `Actúa como un generador de datos para el juego Tabú en 
 Tu respuesta debe ser estrictamente un objeto JSON puro, sin texto adicional ni bloques de código:
 {"word": "...", "taboo": ["...", "...", "..."]}`;
 
+function buildExclusionNote(usedWords) {
+  if (!usedWords || usedWords.size === 0) return '';
+  const list = [...usedWords].join(', ');
+  return `\nIMPORTANTE: NO uses ninguna de estas palabras como palabra secreta porque ya se han jugado: ${list}`;
+}
+
 /**
  * Genera un set de Tabú usando OpenAI
  */
-async function generateWithOpenAI(difficulty) {
+async function generateWithOpenAI(difficulty, usedWords) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || apiKey === 'sk-your-key-here') {
-    return getFallbackSet(difficulty);
+    return getFallbackSet(difficulty, usedWords);
   }
 
+  const exclusion = buildExclusionNote(usedWords);
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -28,7 +35,7 @@ async function generateWithOpenAI(difficulty) {
     body: JSON.stringify({
       model: 'gpt-3.5-turbo',
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: SYSTEM_PROMPT + exclusion },
         { role: 'user', content: `Dificultad: ${difficulty}` },
       ],
       temperature: 0.9,
@@ -38,23 +45,24 @@ async function generateWithOpenAI(difficulty) {
 
   if (!response.ok) {
     console.error('[LLM] Error OpenAI:', response.status);
-    return getFallbackSet(difficulty);
+    return getFallbackSet(difficulty, usedWords);
   }
 
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content?.trim();
-  return parseLLMResponse(content, difficulty);
+  return parseLLMResponse(content, difficulty, usedWords);
 }
 
 /**
  * Genera un set de Tabú usando Gemini
  */
-async function generateWithGemini(difficulty) {
+async function generateWithGemini(difficulty, usedWords) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'your-gemini-key-here') {
-    return getFallbackSet(difficulty);
+    return getFallbackSet(difficulty, usedWords);
   }
 
+  const exclusion = buildExclusionNote(usedWords);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${encodeURIComponent(apiKey)}`;
   const response = await fetch(url, {
     method: 'POST',
@@ -63,7 +71,7 @@ async function generateWithGemini(difficulty) {
       contents: [
         {
           parts: [
-            { text: `${SYSTEM_PROMPT}\n\nDificultad: ${difficulty}` },
+            { text: `${SYSTEM_PROMPT}${exclusion}\n\nDificultad: ${difficulty}` },
           ],
         },
       ],
@@ -73,18 +81,18 @@ async function generateWithGemini(difficulty) {
 
   if (!response.ok) {
     console.error('[LLM] Error Gemini:', response.status);
-    return getFallbackSet(difficulty);
+    return getFallbackSet(difficulty, usedWords);
   }
 
   const data = await response.json();
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  return parseLLMResponse(content, difficulty);
+  return parseLLMResponse(content, difficulty, usedWords);
 }
 
 /**
  * Parsea la respuesta del LLM y la valida
  */
-function parseLLMResponse(content, difficulty) {
+function parseLLMResponse(content, difficulty, usedWords) {
   try {
     // Limpiar posibles backticks de markdown
     const cleaned = content.replace(/```json?\s*/g, '').replace(/```/g, '').trim();
@@ -94,15 +102,21 @@ function parseLLMResponse(content, difficulty) {
       Array.isArray(parsed.taboo) &&
       parsed.taboo.length > 0
     ) {
+      const word = parsed.word.toUpperCase();
+      // Si el LLM devolvió una palabra ya usada, intentar con fallback
+      if (usedWords && usedWords.has(word)) {
+        console.warn(`[LLM] Palabra repetida del LLM: ${word}, usando fallback`);
+        return getFallbackSet(difficulty, usedWords);
+      }
       return {
-        word: parsed.word.toUpperCase(),
+        word,
         taboo: parsed.taboo.map((w) => w.toUpperCase()),
       };
     }
   } catch (e) {
     console.error('[LLM] Error parseando respuesta:', e.message);
   }
-  return getFallbackSet(difficulty);
+  return getFallbackSet(difficulty, usedWords);
 }
 
 /* ────────────────── Banco de palabras de respaldo ────────────────── */
@@ -149,23 +163,33 @@ const FALLBACK_WORDS = {
   ],
 };
 
-function getFallbackSet(difficulty) {
+function getFallbackSet(difficulty, usedWords) {
   const pool = FALLBACK_WORDS[difficulty] || FALLBACK_WORDS['Medio'];
-  const idx = Math.floor(Math.random() * pool.length);
-  return { ...pool[idx] };
+  // Filtrar palabras ya usadas
+  let available = pool;
+  if (usedWords && usedWords.size > 0) {
+    available = pool.filter((entry) => !usedWords.has(entry.word.toUpperCase()));
+  }
+  // Si se agotaron todas, reiniciar (permitir repetición)
+  if (available.length === 0) {
+    console.warn('[Fallback] Todas las palabras usadas, reiniciando pool');
+    available = pool;
+  }
+  const idx = Math.floor(Math.random() * available.length);
+  return { ...available[idx] };
 }
 
 /* ────────────────── API pública ────────────────── */
 
-export async function generateTabooSet(difficulty = 'Medio') {
+export async function generateTabooSet(difficulty = 'Medio', usedWords = null) {
   const provider = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
   try {
     if (provider === 'gemini') {
-      return await generateWithGemini(difficulty);
+      return await generateWithGemini(difficulty, usedWords);
     }
-    return await generateWithOpenAI(difficulty);
+    return await generateWithOpenAI(difficulty, usedWords);
   } catch (err) {
     console.error('[LLM] Error general:', err.message);
-    return getFallbackSet(difficulty);
+    return getFallbackSet(difficulty, usedWords);
   }
 }

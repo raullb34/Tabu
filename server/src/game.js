@@ -21,6 +21,7 @@ function createRoom(name, difficulty) {
     giverIndex: 0,
     currentWord: null,
     tabooWords: [],
+    usedWords: new Set(),   // palabras ya jugadas en esta sala
     roundActive: false,
     roundTimer: null,
     roundEndTime: null,
@@ -53,10 +54,11 @@ async function startRound(io, room) {
 
   const giver = room.players[room.giverIndex % room.players.length];
 
-  // Generar palabras con el LLM
-  const tabooSet = await generateTabooSet(room.difficulty);
+  // Generar palabras con el LLM (excluyendo las ya usadas)
+  const tabooSet = await generateTabooSet(room.difficulty, room.usedWords);
   room.currentWord = tabooSet.word;
   room.tabooWords = tabooSet.taboo;
+  room.usedWords.add(tabooSet.word.toUpperCase());
 
   // Al dador: palabra + prohibidas
   io.to(giver.socketId).emit('round:start-giver', {
