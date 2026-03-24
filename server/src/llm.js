@@ -63,7 +63,7 @@ async function generateWithGemini(difficulty, usedWords) {
   }
 
   const exclusion = buildExclusionNote(usedWords);
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -78,6 +78,24 @@ async function generateWithGemini(difficulty, usedWords) {
       generationConfig: { temperature: 0.9, maxOutputTokens: 200 },
     }),
   });
+
+  if (response.status === 429) {
+    console.warn('[LLM] Gemini rate-limited, reintentando en 2s...');
+    await new Promise((r) => setTimeout(r, 2000));
+    const retry = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `${SYSTEM_PROMPT}${exclusion}\n\nDificultad: ${difficulty}` }] }],
+        generationConfig: { temperature: 0.9, maxOutputTokens: 200 },
+      }),
+    });
+    if (retry.ok) {
+      const retryData = await retry.json();
+      const retryContent = retryData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      return parseLLMResponse(retryContent, difficulty, usedWords);
+    }
+  }
 
   if (!response.ok) {
     console.error('[LLM] Error Gemini:', response.status);

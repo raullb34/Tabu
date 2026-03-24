@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { generateTabooSet } from './llm.js';
+import { registerRummyHandlers, createRummyState, handleRummyDisconnect } from './rummy.js';
 
 /* ═══════════════════════════════════ Estado Global ═══════════════════════════════════ */
 
@@ -9,26 +10,45 @@ const rooms = new Map();
 /** @type {Map<string, string>} socketId → roomId */
 const playerRoomMap = new Map();
 
+/* ═══════════════════════════ Exports para otros módulos ═══════════════════════════ */
+export { rooms, playerRoomMap, getRoom, getRoomOfSocket, sanitize, broadcastRoomState };
+
 /* ═══════════════════════════════════ Helpers ═══════════════════════════════════ */
 
-function createRoom(name, difficulty) {
+function createRoom(name, difficulty, gameType = 'taboo') {
   const id = uuidv4().slice(0, 6).toUpperCase();
-  return {
+  const base = {
     id,
     name,
+    gameType,
     difficulty,
     players: [],          // { id, socketId, name, score }
-    giverIndex: 0,
-    currentWord: null,
-    tabooWords: [],
-    usedWords: new Set(),   // palabras ya jugadas en esta sala
-    roundActive: false,
-    roundTimer: null,
-    roundEndTime: null,
     messages: [],
-    roundNumber: 0,
-    maxRounds: 0,         // 0 = ilimitado, se calcula al iniciar
   };
+
+  if (gameType === 'taboo') {
+    return {
+      ...base,
+      giverIndex: 0,
+      currentWord: null,
+      tabooWords: [],
+      usedWords: new Set(),
+      roundActive: false,
+      roundTimer: null,
+      roundEndTime: null,
+      roundNumber: 0,
+      maxRounds: 0,
+    };
+  }
+
+  if (gameType === 'rummy') {
+    return {
+      ...base,
+      ...createRummyState(),
+    };
+  }
+
+  return base;
 }
 
 function getRoom(roomId) {
@@ -139,31 +159,46 @@ function containsTabooWord(message, tabooWords, secretWord) {
 }
 
 function broadcastRoomState(io, room) {
-  const giver = room.players[room.giverIndex % room.players.length];
-  io.to(room.id).emit('room:state', {
+  const base = {
     id: room.id,
     name: room.name,
+    gameType: room.gameType,
     difficulty: room.difficulty,
     players: room.players.map((p) => ({
       id: p.id,
       name: p.name,
       score: p.score,
-      isGiver: p.socketId === giver?.socketId,
     })),
-    roundActive: room.roundActive,
-    roundNumber: room.roundNumber,
-    giverName: giver?.name,
-  });
+  };
+
+  if (room.gameType === 'taboo') {
+    const giver = room.players[room.giverIndex % room.players.length];
+    io.to(room.id).emit('room:state', {
+      ...base,
+      players: room.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        score: p.score,
+        isGiver: p.socketId === giver?.socketId,
+      })),
+      roundActive: room.roundActive,
+      roundNumber: room.roundNumber,
+      giverName: giver?.name,
+    });
+  } else {
+    io.to(room.id).emit('room:state', base);
+  }
 }
 
 /* ═══════════════════════════ Handlers de Socket ═══════════════════════════ */
 
 export function registerGameHandlers(io, socket) {
   // ─── Crear sala ───
-  socket.on('room:create', ({ playerName, roomName, difficulty }, cb) => {
+  socket.on('room:create', ({ playerName, roomName, difficulty, gameType }, cb) => {
     const safeName = sanitize(playerName || 'Jugador');
     const safeRoom = sanitize(roomName || 'Sala');
-    const room = createRoom(safeRoom, difficulty || 'Medio');
+    const validGameType = ['taboo', 'rummy'].includes(gameType) ? gameType : 'taboo';
+    const room = createRoom(safeRoom, difficulty || 'Medio', validGameType);
 
     const player = {
       id: uuidv4(),
@@ -179,7 +214,7 @@ export function registerGameHandlers(io, socket) {
     broadcastRoomState(io, room);
 
     if (typeof cb === 'function') {
-      cb({ ok: true, roomId: room.id, playerId: player.id });
+      cb({ ok: true, roomId: room.id, playerId: player.id, gameType: validGameType });
     }
   });
 
@@ -213,14 +248,14 @@ export function registerGameHandlers(io, socket) {
     });
 
     if (typeof cb === 'function') {
-      cb({ ok: true, roomId: room.id, playerId: player.id });
+      cb({ ok: true, roomId: room.id, playerId: player.id, gameType: room.gameType });
     }
   });
 
-  // ─── Iniciar ronda ───
+  // ─── Iniciar ronda (Tabú) ───
   socket.on('round:start', () => {
     const room = getRoomOfSocket(socket.id);
-    if (!room || room.roundActive) return;
+    if (!room || room.gameType !== 'taboo' || room.roundActive) return;
     if (room.players.length < 2) {
       socket.emit('error:message', 'Se necesitan al menos 2 jugadores.');
       return;
@@ -228,10 +263,11 @@ export function registerGameHandlers(io, socket) {
     startRound(io, room);
   });
 
-  // ─── Chat / Adivinanza ───
+  // ─── Chat / Adivinanza (solo Tabú) ───
   socket.on('chat:send', ({ text }) => {
     const room = getRoomOfSocket(socket.id);
     if (!room) return;
+    if (room.gameType !== 'taboo') return; // Rummy tiene su propio chat
 
     const safeText = (text || '').replace(/[<>]/g, '').trim().slice(0, 200);
     if (!safeText) return;
@@ -301,10 +337,10 @@ export function registerGameHandlers(io, socket) {
     });
   });
 
-  // ─── Saltar ronda ───
+  // ─── Saltar ronda (Tabú) ───
   socket.on('round:skip', () => {
     const room = getRoomOfSocket(socket.id);
-    if (!room || !room.roundActive) return;
+    if (!room || room.gameType !== 'taboo' || !room.roundActive) return;
     const giver = room.players[room.giverIndex % room.players.length];
     if (socket.id !== giver.socketId) return;
 
@@ -316,10 +352,10 @@ export function registerGameHandlers(io, socket) {
     endRound(io, room, null, 'skipped');
   });
 
-  // ─── Cambiar dificultad ───
+  // ─── Cambiar dificultad (Tabú) ───
   socket.on('room:difficulty', ({ difficulty }) => {
     const room = getRoomOfSocket(socket.id);
-    if (!room || room.roundActive) return;
+    if (!room || room.gameType !== 'taboo' || room.roundActive) return;
     if (['Fácil', 'Medio', 'Difícil'].includes(difficulty)) {
       room.difficulty = difficulty;
       broadcastRoomState(io, room);
@@ -327,19 +363,28 @@ export function registerGameHandlers(io, socket) {
   });
 
   // ─── Listar salas ───
-  socket.on('rooms:list', (_, cb) => {
+  socket.on('rooms:list', ({ gameType } = {}, cb) => {
+    // Support old format: rooms:list(_, cb)
+    const callback = typeof gameType === 'function' ? gameType : cb;
+    const filter = typeof gameType === 'string' ? gameType : null;
+
     const list = [];
     rooms.forEach((room) => {
+      if (filter && room.gameType !== filter) return;
       list.push({
         id: room.id,
         name: room.name,
+        gameType: room.gameType,
         players: room.players.length,
         difficulty: room.difficulty,
         roundActive: room.roundActive,
       });
     });
-    if (typeof cb === 'function') cb(list);
+    if (typeof callback === 'function') callback(list);
   });
+
+  // ─── Registrar handlers de Rummy ───
+  registerRummyHandlers(io, socket);
 
   // ─── Desconexión ───
   socket.on('disconnect', () => {
@@ -353,16 +398,19 @@ export function registerGameHandlers(io, socket) {
     room.players.splice(idx, 1);
     playerRoomMap.delete(socket.id);
 
-    // Si era el dador activo, terminar ronda
-    if (room.roundActive) {
-      const giverIdx = room.giverIndex % (room.players.length + 1);
-      if (idx === giverIdx) {
-        endRound(io, room, null, 'giver-left');
+    if (room.gameType === 'taboo') {
+      // Si era el dador activo, terminar ronda
+      if (room.roundActive) {
+        const giverIdx = room.giverIndex % (room.players.length + 1);
+        if (idx === giverIdx) {
+          endRound(io, room, null, 'giver-left');
+        }
+        if (room.giverIndex > 0 && idx < room.giverIndex) {
+          room.giverIndex -= 1;
+        }
       }
-      // Ajustar giverIndex si es necesario
-      if (room.giverIndex > 0 && idx < room.giverIndex) {
-        room.giverIndex -= 1;
-      }
+    } else if (room.gameType === 'rummy') {
+      handleRummyDisconnect(io, room, socket.id);
     }
 
     if (room.players.length === 0) {

@@ -2,9 +2,15 @@ import { useState } from 'react';
 import { useTheme } from '../ThemeContext';
 import socket from '../socket';
 
-export default function Lobby({ onJoined }) {
+const GAME_LABELS = {
+  taboo: { name: 'Tabú', emoji: '🚫', defaultRoom: 'Sala Tabú' },
+  rummy: { name: 'Rummikub', emoji: '🎲', defaultRoom: 'Sala Rummikub' },
+};
+
+export default function Lobby({ onJoined, gameType, onBack }) {
   const { dark } = useTheme();
   const [tab, setTab] = useState('create'); // 'create' | 'join'
+  const gameLabel = GAME_LABELS[gameType] || GAME_LABELS.taboo;
   const [playerName, setPlayerName] = useState('');
   const [roomName, setRoomName] = useState('');
   const [roomCode, setRoomCode] = useState('');
@@ -45,11 +51,11 @@ export default function Lobby({ onJoined }) {
       if (tab === 'create') {
         socket.emit(
           'room:create',
-          { playerName: name, roomName: roomName.trim() || 'Sala Tabú', difficulty },
+          { playerName: name, roomName: roomName.trim() || gameLabel.defaultRoom, difficulty, gameType },
           (res) => {
             setLoading(false);
             if (res.ok) {
-              onJoined({ roomId: res.roomId, playerId: res.playerId, playerName: name });
+              onJoined({ roomId: res.roomId, playerId: res.playerId, playerName: name, gameType: res.gameType || gameType });
             } else {
               setError(res.error || 'Error al crear sala');
             }
@@ -68,7 +74,7 @@ export default function Lobby({ onJoined }) {
           (res) => {
             setLoading(false);
             if (res.ok) {
-              onJoined({ roomId: res.roomId, playerId: res.playerId, playerName: name });
+              onJoined({ roomId: res.roomId, playerId: res.playerId, playerName: name, gameType: res.gameType || gameType });
             } else {
               setError(res.error || 'Error al unirse');
             }
@@ -86,17 +92,28 @@ export default function Lobby({ onJoined }) {
 
   return (
     <div className={`${card} p-6 w-full max-w-md animate-fade-in`}>
-      {/* Logo */}
+      {/* Back + Logo */}
       <div className="text-center mb-6">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className={`absolute-left mb-2 text-xs ${
+              dark ? 'text-hacker-orange/50 hover:text-hacker-orange font-mono' : 'text-paper-sepia hover:text-paper-ink font-sketch'
+            }`}
+            style={{ float: 'left' }}
+          >
+            {dark ? '< VOLVER' : '← Volver'}
+          </button>
+        )}
         <h2
           className={`text-4xl font-bold mb-2 ${
             dark ? 'text-hacker-orange drop-shadow-[0_0_10px_rgba(255,136,0,0.5)]' : 'text-paper-ink'
           }`}
         >
-          TABÚ
+          {gameLabel.emoji} {gameLabel.name}
         </h2>
         <p className={`text-sm ${dark ? 'text-hacker-orange/50 font-mono' : 'text-paper-sepia font-sketch text-base'}`}>
-          {dark ? '> Juego de palabras prohibidas_' : '~ Juego de palabras prohibidas ~'}
+          {dark ? `> ${gameLabel.name} multijugador_` : `~ ${gameLabel.name} multijugador ~`}
         </p>
       </div>
 
@@ -152,33 +169,35 @@ export default function Lobby({ onJoined }) {
               />
             </div>
 
-            <div>
-              <label className={`block text-xs mb-1 ${dark ? 'text-hacker-orange/60 font-mono' : 'text-paper-sepia font-sketch text-sm'}`}>
-                {dark ? 'DIFICULTAD:' : 'Dificultad'}
-              </label>
-              <div className="flex gap-2">
-                {['Fácil', 'Medio', 'Difícil'].map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDifficulty(d)}
-                    className={`flex-1 py-1.5 rounded text-xs transition-all ${
-                      dark ? 'font-mono' : 'font-sketch text-sm'
-                    } ${
-                      difficulty === d
-                        ? dark
-                          ? 'bg-hacker-orange text-hacker-bg shadow-neon-sm'
-                          : 'bg-paper-ink text-paper-bg shadow-paper-sm'
-                        : dark
-                          ? 'border border-hacker-orange/30 text-hacker-orange/50 hover:text-hacker-orange'
-                          : 'border-2 border-paper-ink/20 text-paper-sepia hover:text-paper-ink'
-                    }`}
-                  >
-                    {d}
-                  </button>
-                ))}
+            {gameType === 'taboo' && (
+              <div>
+                <label className={`block text-xs mb-1 ${dark ? 'text-hacker-orange/60 font-mono' : 'text-paper-sepia font-sketch text-sm'}`}>
+                  {dark ? 'DIFICULTAD:' : 'Dificultad'}
+                </label>
+                <div className="flex gap-2">
+                  {['Fácil', 'Medio', 'Difícil'].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setDifficulty(d)}
+                      className={`flex-1 py-1.5 rounded text-xs transition-all ${
+                        dark ? 'font-mono' : 'font-sketch text-sm'
+                      } ${
+                        difficulty === d
+                          ? dark
+                            ? 'bg-hacker-orange text-hacker-bg shadow-neon-sm'
+                            : 'bg-paper-ink text-paper-bg shadow-paper-sm'
+                          : dark
+                            ? 'border border-hacker-orange/30 text-hacker-orange/50 hover:text-hacker-orange'
+                            : 'border-2 border-paper-ink/20 text-paper-sepia hover:text-paper-ink'
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
 
